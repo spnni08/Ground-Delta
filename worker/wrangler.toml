@@ -1,0 +1,19 @@
+name = "ground-delta-worker"
+main = "src/index.js"
+compatibility_date = "2024-09-01"
+
+# Created via: wrangler d1 create ground-delta-db
+# Paste the returned database_id below before first deploy.
+[[d1_databases]]
+binding = "DB"
+database_name = "ground-delta-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# A shared secret the frontend sends as `X-Api-Key` so randoms on the
+# internet can't read/overwrite your trade journal or trigger the
+# webhook. Set with: wrangler secret put API_KEY
+# TradingView alert webhooks can't send custom headers, so the webhook
+# route also accepts the same value as a `?key=` query param.
+#
+# Per-exchange read-only API credentials (Phase 4) will be added here
+# as their own `wrangler secret put` entries in a follow-up PR.
