@@ -9,11 +9,20 @@ binding = "DB"
 database_name = "ground-delta-db"
 database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
-# A shared secret the frontend sends as `X-Api-Key` so randoms on the
-# internet can't read/overwrite your trade journal or trigger the
-# webhook. Set with: wrangler secret put API_KEY
-# TradingView alert webhooks can't send custom headers, so the webhook
-# route also accepts the same value as a `?key=` query param.
+[vars]
+FIREBASE_PROJECT_ID = "ground-delta-journal"
+
+# GET/PUT /api/state require a Firebase ID token (Authorization: Bearer
+# <token>), verified against Firebase's public JWKS — no secret to set
+# for that. FIREBASE_JWKS_URL only exists so tests can point it at a
+# mock server; leave it unset in production, it defaults to Google's
+# real endpoint.
+
+# /webhook/close can't carry a login (TradingView can't authenticate),
+# so it keeps a shared secret instead: set with `wrangler secret put
+# API_KEY`, then send it as the `X-Api-Key` header or (since TradingView
+# alerts can't set custom headers) a `?key=` query param, alongside a
+# `?uid=<your Firebase UID>` telling the webhook whose trades to search.
 #
 # Per-exchange read-only API credentials (Phase 4) will be added here
 # as their own `wrangler secret put` entries in a follow-up PR.
