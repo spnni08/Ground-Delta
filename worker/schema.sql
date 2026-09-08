@@ -22,3 +22,15 @@ CREATE TABLE IF NOT EXISTS workspace_state (
   version INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
+
+-- Admin panel (src/index.js /admin/* routes) — every write an admin
+-- makes to another user's workspace_state is appended here, never
+-- overwritten, so there's always a record of who changed what and when.
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  admin_uid TEXT NOT NULL,      -- who made the change (always the single admin UID)
+  target_uid TEXT NOT NULL,     -- whose workspace_state row was written
+  version_after INTEGER NOT NULL,
+  data_after TEXT NOT NULL,     -- full JSON snapshot post-write, for auditability
+  created_at TEXT NOT NULL
+);

@@ -1,4 +1,4 @@
-// Ground Delta backend worker — Phase 3 + Firebase Auth.
+// Ground Delta backend worker — Phase 3 + Firebase Auth + admin panel.
 //
 // Stores the { strategies, trades } tree as one JSON blob per Firebase
 // user (D1 row keyed by UID — see schema.sql), guarded by an
@@ -7,6 +7,9 @@
 //   GET  /api/state              -> { data, version }              [Firebase ID token required]
 //   PUT  /api/state              -> { data, expectedVersion } -> { version } | 409   [Firebase ID token required]
 //   POST /webhook/close          -> TradingView alert -> closes matching open trade(s)  [API_KEY + ?uid= required]
+//   GET  /admin/users            -> [{ uid, tradeCount, strategyCount, version, updatedAt }]  [admin UID only]
+//   GET  /admin/state?uid=X      -> { data, version }                                          [admin UID only]
+//   PUT  /admin/state?uid=X      -> { data, expectedVersion } -> { version } | 409             [admin UID only]
 //
 // /api/state authenticates the caller via a Firebase ID token
 // (`Authorization: Bearer <token>`), verified here against Google's
@@ -19,9 +22,25 @@
 // in), so it keeps the shared-secret `API_KEY` (`X-Api-Key` header or
 // `?key=` query param) plus an explicit `?uid=` telling it whose
 // trades to search — put both in the TradingView alert's webhook URL.
+//
+// /admin/* is gated by a single hardcoded ADMIN_UID (below), not a
+// role stored in D1 — there's exactly one admin account, deliberately
+// created outside any normal trading workflow, so no code path can
+// accidentally promote a regular user into it. Every /admin/* request
+// still goes through the same requireUser() Firebase-token check as
+// /api/state; the only difference is an extra uid === ADMIN_UID gate
+// (403 for anyone else, including other valid, logged-in users).
 
 const FIREBASE_PROJECT_ID_DEFAULT = 'ground-delta-journal';
 const DEFAULT_JWKS_URL = 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
+
+// The one and only admin account's Firebase UID (admin@grounddelta.de,
+// registered specifically as an internal tool — not a real trading
+// account). Whoever controls this UID can read/write every user's
+// trades, so treat it like a secret even though it isn't one
+// technically: don't publish it, and if it ever needs to change,
+// update it here and redeploy.
+const ADMIN_UID = 'jD5DYwkIm6dAj20yZ0UIGGh9ArG2';
 
 function corsHeaders(origin) {
   return {
@@ -109,6 +128,15 @@ async function requireUser(request, env) {
   const m = header.match(/^Bearer (.+)$/);
   if (!m) throw new Error('missing bearer token');
   return verifyFirebaseToken(m[1], env);
+}
+
+// Same Firebase-token check as requireUser(), plus the admin-UID gate.
+// Throws (never returns a non-admin uid) so callers can treat any
+// failure here identically to an auth failure.
+async function requireAdmin(request, env) {
+  const { uid, email } = await requireUser(request, env);
+  if (uid !== ADMIN_UID) throw new Error('forbidden: not the admin account');
+  return { uid, email };
 }
 
 // ---- state storage (per-user row, keyed by Firebase UID) ----
@@ -215,6 +243,41 @@ async function handleWebhookClose(request, env, origin, uid) {
   return json({ error: 'could not save after retry, please retry the alert' }, 409, origin);
 }
 
+// ---- admin panel (single hardcoded ADMIN_UID, see requireAdmin()) ----
+
+async function handleAdminUsers(env, origin) {
+  const { results } = await env.DB.prepare(
+    'SELECT id, data, version, updated_at FROM workspace_state ORDER BY updated_at DESC'
+  ).all();
+  const users = results.map((row) => {
+    let tradeCount = 0, strategyCount = 0;
+    try {
+      const data = JSON.parse(row.data);
+      tradeCount = Array.isArray(data.trades) ? data.trades.length : 0;
+      strategyCount = Array.isArray(data.strategies) ? data.strategies.length : 0;
+    } catch (e) { /* malformed row — report zero counts rather than failing the whole list */ }
+    return { uid: row.id, tradeCount, strategyCount, version: row.version, updatedAt: row.updated_at };
+  });
+  return json({ users }, 200, origin);
+}
+
+async function handleAdminPutState(request, env, origin, adminUid, targetUid) {
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: 'invalid JSON body' }, 400, origin); }
+  if (!body || typeof body !== 'object' || !body.data) return json({ error: '"data" is required' }, 400, origin);
+  const result = await saveState(env, targetUid, body.data, body.expectedVersion);
+  if (result.conflict) return json({ error: 'version conflict', version: result.version }, 409, origin);
+  // Audit log is append-only and best-effort: a logging failure must
+  // never undo or mask a write that already succeeded, so it's logged
+  // to the console rather than turned into an error response.
+  try {
+    await env.DB.prepare(
+      'INSERT INTO admin_audit_log (admin_uid, target_uid, version_after, data_after, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).bind(adminUid, targetUid, result.version, JSON.stringify(body.data), new Date().toISOString()).run();
+  } catch (e) { console.error('admin_audit_log insert failed:', e); }
+  return json({ version: result.version }, 200, origin);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -243,6 +306,25 @@ export default {
       const uid = url.searchParams.get('uid');
       if (!uid) return json({ error: '?uid= query param is required' }, 400, origin);
       return handleWebhookClose(request, env, origin, uid);
+    }
+
+    if (url.pathname === '/admin/users' && request.method === 'GET') {
+      // 403 (not 401) for every failure here, including a missing/invalid
+      // token — a caller who isn't the admin shouldn't be able to tell
+      // "not logged in" apart from "logged in but not admin".
+      try { await requireAdmin(request, env); }
+      catch (e) { return json({ error: 'forbidden' }, 403, origin); }
+      return handleAdminUsers(env, origin);
+    }
+
+    if (url.pathname === '/admin/state' && (request.method === 'GET' || request.method === 'PUT')) {
+      let adminUid;
+      try { ({ uid: adminUid } = await requireAdmin(request, env)); }
+      catch (e) { return json({ error: 'forbidden' }, 403, origin); }
+      const targetUid = url.searchParams.get('uid');
+      if (!targetUid) return json({ error: '?uid= query param is required' }, 400, origin);
+      if (request.method === 'GET') return json(await getState(env, targetUid), 200, origin);
+      return handleAdminPutState(request, env, origin, adminUid, targetUid);
     }
 
     return json({ error: 'not found' }, 404, origin);
