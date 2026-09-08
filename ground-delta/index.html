@@ -398,5 +398,30 @@ document.addEventListener('DOMContentLoaded', async function() {
   document.body.appendChild(footer);
 })();
 </script>
+<script>
+(function () {
+  var DEFAULT_API_BASE = 'https://ground-delta-worker.ground-delta.workers.dev';
+  var apiBase;
+  try {
+    apiBase = localStorage.getItem('gd_api_base') || DEFAULT_API_BASE;
+  } catch (e) {
+    apiBase = DEFAULT_API_BASE;
+  }
+
+  var attempts = 0;
+  var maxAttempts = 200; // ~20s at 100ms
+  var poll = setInterval(function () {
+    attempts++;
+    if (typeof window.__dcSetProps === 'function' && typeof window.__dcRootName === 'function') {
+      clearInterval(poll);
+      try {
+        window.__dcSetProps(window.__dcRootName(), { apiBase: apiBase });
+      } catch (e) {}
+      return;
+    }
+    if (attempts >= maxAttempts) clearInterval(poll);
+  }, 100);
+})();
+</script>
 </body>
 </html>
