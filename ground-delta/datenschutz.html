@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Datenschutzerklärung – Ground Delta</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f4f7fb;
+    --text: #12181f;
+    --mut: #5a6472;
+    --line: #dde3ea;
+    --accent: #1d5fd6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a0a0a;
+      --panel: #161616;
+      --text: #f2f2f2;
+      --mut: #9a9a9a;
+      --line: #2a2a2a;
+      --accent: #e2242f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 48px 20px 80px;
+  }
+  a.back {
+    display: inline-block;
+    margin-bottom: 24px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 14px;
+  }
+  a.back:hover { text-decoration: underline; }
+  h1 {
+    font-size: 28px;
+    margin: 0 0 8px;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 12px;
+  }
+  h2 {
+    font-size: 18px;
+    margin: 32px 0 8px;
+    color: var(--accent);
+  }
+  p { margin: 0 0 12px; color: var(--text); }
+  ul { margin: 0 0 12px; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  .mut { color: var(--mut); font-size: 13px; margin-top: 40px; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/">&larr; Zurück zu Ground Delta</a>
+  <h1>Datenschutzerklärung</h1>
+
+  <h2>1. Verantwortlicher</h2>
+  <p>
+    Marvin Florian Spenninger<br>
+    Reiherweg 13<br>
+    72818 Trochtelfingen<br>
+    E-Mail: spenningermarvin@gmail.com
+  </p>
+
+  <h2>2. Welche Daten wir verarbeiten</h2>
+  <p>Bei der Nutzung von Ground Delta werden folgende Daten verarbeitet:</p>
+  <ul>
+    <li><strong>Trade-Daten:</strong> von dir eingegebene Trades (Strategie, Einstieg/Ausstieg, P&amp;L, Notizen, Emotionen)</li>
+    <li><strong>API-Keys (read-only):</strong> falls du deine Börse (MEXC, Binance, Kraken, Coinbase, Bitget) verknüpfst, wird ausschließlich ein lesender Zugriffsschlüssel gespeichert, der keine Handels- oder Auszahlungsrechte besitzt</li>
+    <li><strong>Technische Daten:</strong> Server-Logs bei Aufruf der Cloudflare-Worker-Backend (IP-Adresse, Zeitstempel, angefragte Ressource) zur Sicherstellung des Betriebs</li>
+    <li><strong>Webhook-Daten:</strong> TradingView-Webhooks zum automatischen Schließen von Trades bei TP/SL</li>
+  </ul>
+
+  <h2>3. Zweck der Verarbeitung</h2>
+  <ul>
+    <li>Bereitstellung der Journal-Funktion (Speichern, Anzeigen, Auswerten deiner Trades)</li>
+    <li>Automatisches Schließen von Positionen über Webhooks</li>
+    <li>Fehlerbehebung und Absicherung des Systems gegen Missbrauch</li>
+  </ul>
+
+  <h2>4. Speicherung</h2>
+  <p>Die Daten werden in einer Cloudflare D1-Datenbank gespeichert, die einem separaten Cloudflare-Account zugeordnet ist. Es findet keine Weitergabe an Dritte statt, außer wo es zur Erbringung des Dienstes technisch nötig ist (z.B. Cloudflare als Hosting-/Infrastrukturanbieter).</p>
+
+  <h2>5. Rechtsgrundlage</h2>
+  <p>Die Verarbeitung erfolgt auf Grundlage deiner Einwilligung (Art. 6 Abs. 1 lit. a DSGVO) bzw. zur Erfüllung eines Vertrags bzw. vorvertraglicher Maßnahmen (Art. 6 Abs. 1 lit. b DSGVO), sobald ein Nutzerkonto angelegt wird.</p>
+
+  <h2>6. Deine Rechte</h2>
+  <p>Du hast das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit sowie Widerspruch gegen die Verarbeitung deiner Daten. Wende dich dazu an die oben genannte E-Mail-Adresse.</p>
+
+  <h2>7. Hosting</h2>
+  <p>Diese Anwendung wird über Firebase Hosting (Google) sowie Cloudflare Workers und Cloudflare D1 betrieben. Beide Anbieter können im Rahmen der Bereitstellung technisch bedingt Server-Logs verarbeiten.</p>
+
+  <h2>8. Cookies / Local Storage</h2>
+  <p>Ground Delta nutzt technisch notwendigen Local Storage bzw. eine Datenbankanbindung zur Speicherung deiner Trade-Daten. Es werden keine Tracking- oder Marketing-Cookies eingesetzt.</p>
+
+  <h2>9. Änderungen</h2>
+  <p>Diese Datenschutzerklärung kann angepasst werden, sobald neue Funktionen (z.B. Payment) hinzukommen.</p>
+
+  <p class="mut">Stand: Beta-Fassung</p>
+</main>
+</body>
+</html>
