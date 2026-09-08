@@ -26,3 +26,27 @@ FIREBASE_PROJECT_ID = "ground-delta-journal"
 #
 # Per-exchange read-only API credentials (Phase 4) will be added here
 # as their own `wrangler secret put` entries in a follow-up PR.
+
+# ---- extended admin panel (worker/src/index.js /admin/users/*) ----
+#
+# POST /admin/users (create a new Firebase user) needs the project's
+# Web API key — the same one already in the frontend's Firebase config
+# (index.html firebaseApiKey), NOT a secret in the traditional sense
+# (it's already public-ish, shipped to every browser) but not currently
+# passed to the worker either, so it needs setting once:
+#   wrangler secret put FIREBASE_API_KEY
+#
+# POST /admin/users/:uid/revoke-sessions, /reset-password, and
+# DELETE /admin/users/:uid all act on an arbitrary target UID rather
+# than "the caller's own account", which Identity Toolkit only allows
+# for a request authenticated as a service account (OAuth2, not the
+# API key). Without this secret those three endpoints return a 500
+# with a message explaining exactly that — they do NOT silently no-op.
+# To enable them:
+#   1. Firebase console -> Project settings -> Service accounts
+#      -> "Generate new private key" (downloads a JSON file)
+#   2. wrangler secret put FIREBASE_SERVICE_ACCOUNT_JSON
+#      (paste the ENTIRE downloaded JSON file as the value)
+#
+# FIREBASE_API_KEY = (set via `wrangler secret put`, not a [vars] entry — see above)
+# FIREBASE_SERVICE_ACCOUNT_JSON = (set via `wrangler secret put`, not a [vars] entry — see above)

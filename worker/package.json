@@ -5,7 +5,9 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "db:migrate:local": "wrangler d1 execute ground-delta-db --local --file=./schema.sql",
-    "db:migrate:remote": "wrangler d1 execute ground-delta-db --remote --file=./schema.sql"
+    "db:migrate:remote": "wrangler d1 execute ground-delta-db --remote --file=./schema.sql",
+    "db:migrate:admin-panel:local": "wrangler d1 execute ground-delta-db --local --file=./migrations/0001_admin_panel.sql",
+    "db:migrate:admin-panel:remote": "wrangler d1 execute ground-delta-db --remote --file=./migrations/0001_admin_panel.sql"
   },
   "devDependencies": {
     "wrangler": "^3.78.0"
