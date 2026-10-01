@@ -7,6 +7,7 @@
 //   GET    /api/state                      -> { data, version }              [Firebase ID token required]
 //   PUT    /api/state                      -> { data, expectedVersion } -> { version } | 409   [Firebase ID token required]
 //   POST   /webhook/close                  -> TradingView alert -> closes matching open trade(s)  [API_KEY + ?uid= required]
+//   GET    /nova/trades, POST /nova/trades, POST /nova/trades/:id/close -> NOVA assistant (see nova.js)  [X-Api-Key + ?uid= required]
 //   GET    /admin/users                    -> [{ uid, tradeCount, strategyCount, version, updatedAt, blocked, lastSeen, online }]  [admin UID only]
 //   GET    /admin/state?uid=X              -> { data, version }                                          [admin UID only]
 //   PUT    /admin/state?uid=X              -> { data, expectedVersion } -> { version } | 409             [admin UID only]
@@ -48,6 +49,8 @@
 // Firebase/GCP *service account*. See getServiceAccountToken() below
 // for exactly what that needs and how it degrades (loudly, not
 // silently) when it isn't configured.
+
+import { handleNova } from './nova.js';
 
 const FIREBASE_PROJECT_ID_DEFAULT = 'ground-delta-journal';
 const DEFAULT_JWKS_URL = 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
@@ -589,6 +592,9 @@ export default {
       await touchLastSeen(env, uid);
       return json({ version: result.version }, 200, origin);
     }
+
+    const novaResponse = await handleNova(request, env, url, origin, { getState, saveState, isBlocked, json });
+    if (novaResponse) return novaResponse;
 
     if (url.pathname === '/webhook/close' && request.method === 'POST') {
       if (!webhookAuthOk(request, env, url)) return json({ error: 'unauthorized' }, 401, origin);
