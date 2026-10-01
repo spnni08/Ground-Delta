@@ -88,3 +88,20 @@ TP or SL the alert price has reached, and closes it at that exact level
 (TP checked first). If nothing matches, it responds 200 with an empty
 `closed` list — no error, since most alerts won't correspond to an open
 trade.
+
+## 6. NOVA (personal assistant) access
+
+NOVA can list trades, add new ones and close open ones in **one** user's
+journal — nothing else (no delete, no arbitrary edits). Routes and the exact
+trade shape are documented at the top of `src/nova.js`.
+
+- Auth: `X-Api-Key` header with `NOVA_API_KEY` (set it with
+  `wrangler secret put NOVA_API_KEY` for a key separate from TradingView's),
+  falling back to the existing `API_KEY`. Fails closed if neither is set, and
+  never accepts the key as a `?key=` query param.
+- `?uid=<your Firebase UID>` selects whose journal — same UID as in the
+  TradingView webhook URL.
+- Trades NOVA writes carry `source: "nova"` and use the same optimistic-lock
+  save as the frontend and webhook, so nothing gets overwritten.
+
+Tests: `npm test` (Node's built-in test runner, no dependencies).
