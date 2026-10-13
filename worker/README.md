@@ -89,31 +89,51 @@ TP or SL the alert price has reached, and closes it at that exact level
 `closed` list — no error, since most alerts won't correspond to an open
 trade.
 
-## 6. NOVA (personal assistant) access — read-only
+## 6. NOVA (personal assistant) access
 
-NOVA can **read** one user's trades (`GET /nova/trades`) — nothing else. There is
-no route that creates, changes or deletes anything; other methods answer 405,
-other paths 404. Details at the top of `src/nova.js`.
+NOVA can **read** one user's trades, **add** a trade and **close** an open one — nothing else
+(no delete, no general edit). Routes, validation and limits are documented at the top of `src/nova.js`.
 
-- Auth: a dedicated token `NOVA_ACCESS_TOKEN` (min. 32 characters), sent as
-  `X-Api-Key` header (what NOVA sends) or `Authorization: Bearer`. Separate from
-  `API_KEY` (TradingView) and from the Firebase login; never accepted as `?key=`.
-  Compared in constant time. Fails closed if not set.
-- `NOVA_ALLOWED_UID`: the one Firebase UID NOVA may read (same UID as in the
-  TradingView webhook URL). NOVA passes it as `?uid=`; any other UID is 403.
-- Response: only the fields NOVA needs. Journal notes are never returned
-  (`notes` is always `""`), no ratings, screenshots, strategy rules or credentials.
-- Rate limit: 60 requests/minute per client IP (429 + `Retry-After`), best effort
-  per Worker isolate.
+| Route | Token | Purpose |
+| --- | --- | --- |
+| `GET /nova/trades?uid=…[&status=&from=&to=&limit=]` | read (`NOVA_ACCESS_TOKEN`) | list trades, minimal shape, notes always `""` |
+| `POST /nova/trades?uid=…` | write (`NOVA_WRITE_TOKEN`) | add a trade (open, or closed if `exit` is given) |
+| `POST /nova/trades/:id/close?uid=…` | write (`NOVA_WRITE_TOKEN`) | close an **open** trade |
+
+- Two separate secrets (each ≥ 32 chars, different from each other and from `API_KEY`), sent as
+  `X-Api-Key` header (or `Authorization: Bearer`), never as `?key=`, compared in constant time.
+  Unknown token → 401. The read token on a write route, or the write token on `GET` → 403.
+  Fails closed: an unset write token disables writes.
+- `NOVA_ALLOWED_UID`: the only Firebase UID NOVA may read or write (`?uid=` must match, else 403).
+- Writes need an `Idempotency-Key` header (8–128 chars `A-Za-z0-9._:-`). The first successful
+  result is kept for 24 h: the same key + same request returns it again (`Idempotent-Replay: true`)
+  instead of creating another trade; same key + different request → 422; first request still
+  running → 409. Rejected requests do not occupy a key.
+- Strict validation (400 with reasons): required `date`, `symbol`, `dir`, `entry`; JSON number types
+  (no numeric strings); prices > 0; `leverage` 1–1000; `HH:MM` times; `session` ≤ 40, `strategy` ≤ 60,
+  `notes` ≤ 2000 chars; body ≤ 8 KB. Unknown fields are dropped. Closing an already closed trade → 409,
+  unknown id → 404.
+- Every write attempt (ok / replay / rejected) is stored in `nova_audit_log` with timestamp, source
+  `nova`, action, UID, trade id and key — never with journal text. Trades written by NOVA carry
+  `source: "nova"`.
+- Rate limit per client IP, counted before authentication (best effort per Worker isolate):
+  reads 60/min, writes 10/min → 429 + `Retry-After`.
+
+Setup (order matters — the migration first):
 
 ```bash
 cd worker
-npx wrangler secret put NOVA_ACCESS_TOKEN   # e.g. output of: openssl rand -hex 32
-npx wrangler secret put NOVA_ALLOWED_UID    # your Firebase UID
+npm run db:migrate:nova-write:remote            # creates nova_idempotency + nova_audit_log
+npx wrangler secret put NOVA_ACCESS_TOKEN       # read token,  e.g. openssl rand -hex 32
+npx wrangler secret put NOVA_WRITE_TOKEN        # write token, a different openssl rand -hex 32
+npx wrangler secret put NOVA_ALLOWED_UID        # your Firebase UID
 npm run deploy
 
-curl -H "X-Api-Key: {{NOVA_ACCESS_TOKEN}}" \
-  "https://ground-delta-worker.<subdomain>.workers.dev/nova/trades?uid={{NOVA_ALLOWED_UID}}&status=open&limit=5"
+BASE=https://ground-delta-worker.<subdomain>.workers.dev
+curl -H "X-Api-Key: {{NOVA_ACCESS_TOKEN}}" "$BASE/nova/trades?uid={{NOVA_ALLOWED_UID}}&status=open&limit=5"
+curl -X POST -H "X-Api-Key: {{NOVA_WRITE_TOKEN}}" -H "Idempotency-Key: test-0001" -H "Content-Type: application/json" \
+  -d '{"date":"2026-10-13","symbol":"NAS100","dir":"Long","entry":20100.5,"sl":20050,"tp":20200}' \
+  "$BASE/nova/trades?uid={{NOVA_ALLOWED_UID}}"
 ```
 
-Tests: `npm test` (Node's built-in test runner, no dependencies).
+Tests: `npm test` (Node's built-in test runner, no dependencies; the D1 SQL test needs Node ≥ 22.5 and is skipped otherwise).

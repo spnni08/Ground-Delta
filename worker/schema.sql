@@ -52,3 +52,25 @@ CREATE TABLE IF NOT EXISTS admin_users (
   blocked INTEGER NOT NULL DEFAULT 0,  -- 1 => /api/state returns 403 for this uid
   last_seen TEXT                  -- ISO timestamp of the most recent successful /api/state call; NULL until first sync
 );
+
+-- NOVA write access (see migrations/0002_nova_write.sql, which holds the same two tables).
+CREATE TABLE IF NOT EXISTS nova_idempotency (
+  key TEXT PRIMARY KEY,         -- Idempotency-Key header value
+  request_hash TEXT NOT NULL,   -- SHA-256 of method + path + validated body
+  status INTEGER,               -- NULL while the first request is still running
+  body TEXT,                    -- the first response body (JSON)
+  created_at INTEGER NOT NULL   -- epoch ms
+);
+
+CREATE TABLE IF NOT EXISTS nova_audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,             -- ISO timestamp
+  source TEXT NOT NULL,         -- always 'nova'
+  action TEXT NOT NULL,         -- trade_add | trade_close
+  uid TEXT NOT NULL,
+  trade_id TEXT,
+  idempotency_key TEXT,
+  outcome TEXT NOT NULL,        -- ok | replay | rejected
+  status INTEGER NOT NULL,      -- HTTP status returned
+  detail TEXT                   -- short reason for rejections, never journal text
+);

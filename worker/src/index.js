@@ -7,7 +7,8 @@
 //   GET    /api/state                      -> { data, version }              [Firebase ID token required]
 //   PUT    /api/state                      -> { data, expectedVersion } -> { version } | 409   [Firebase ID token required]
 //   POST   /webhook/close                  -> TradingView alert -> closes matching open trade(s)  [API_KEY + ?uid= required]
-//   GET    /nova/trades                    -> NOVA assistant, READ-ONLY (see nova.js)  [NOVA_ACCESS_TOKEN in X-Api-Key + ?uid= required]
+//   GET    /nova/trades                    -> NOVA assistant, read   (see nova.js)  [NOVA_ACCESS_TOKEN in X-Api-Key + ?uid=]
+//   POST   /nova/trades, /nova/trades/:id/close -> NOVA assistant, add/close only  [NOVA_WRITE_TOKEN + Idempotency-Key + ?uid=]
 //   GET    /admin/users                    -> [{ uid, tradeCount, strategyCount, version, updatedAt, blocked, lastSeen, online }]  [admin UID only]
 //   GET    /admin/state?uid=X              -> { data, version }                                          [admin UID only]
 //   PUT    /admin/state?uid=X              -> { data, expectedVersion } -> { version } | 409             [admin UID only]
@@ -51,6 +52,7 @@
 // silently) when it isn't configured.
 
 import { handleNova } from './nova.js';
+import { d1NovaStore } from './nova_store.js';
 
 const FIREBASE_PROJECT_ID_DEFAULT = 'ground-delta-journal';
 const DEFAULT_JWKS_URL = 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
@@ -69,7 +71,7 @@ function corsHeaders(origin) {
   return {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'GET,PUT,POST,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type,X-Api-Key,Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type,X-Api-Key,Authorization,Idempotency-Key',
     'Access-Control-Max-Age': '86400'
   };
 }
@@ -601,7 +603,7 @@ export default {
       return json({ version: result.version }, 200, origin);
     }
 
-    const novaResponse = await handleNova(request, env, url, { readState, isBlocked });
+    const novaResponse = await handleNova(request, env, url, { readState, saveState, isBlocked, store: d1NovaStore(env) });
     if (novaResponse) return novaResponse;
 
     if (url.pathname === '/webhook/close' && request.method === 'POST') {

@@ -24,9 +24,12 @@ FIREBASE_PROJECT_ID = "ground-delta-journal"
 # alerts can't set custom headers) a `?key=` query param, alongside a
 # `?uid=<your Firebase UID>` telling the webhook whose trades to search.
 #
-# NOVA (read-only GET /nova/trades) needs two secrets, see README section 6:
-#   wrangler secret put NOVA_ACCESS_TOKEN   (separate from API_KEY, min. 32 chars)
-#   wrangler secret put NOVA_ALLOWED_UID    (the Firebase UID NOVA may read)
+# NOVA (GET /nova/trades, POST /nova/trades, POST /nova/trades/:id/close) needs
+# three secrets and one D1 migration, see README section 6:
+#   npm run db:migrate:nova-write:remote    (migrations/0002_nova_write.sql, BEFORE deploying)
+#   wrangler secret put NOVA_ACCESS_TOKEN   (read token,  min. 32 chars, separate from API_KEY)
+#   wrangler secret put NOVA_WRITE_TOKEN    (write token, min. 32 chars, different from the read token)
+#   wrangler secret put NOVA_ALLOWED_UID    (the one Firebase UID NOVA may read/write)
 #
 # Per-exchange read-only API credentials (Phase 4) will be added here
 # as their own `wrangler secret put` entries in a follow-up PR.
