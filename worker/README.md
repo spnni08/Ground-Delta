@@ -89,19 +89,31 @@ TP or SL the alert price has reached, and closes it at that exact level
 `closed` list — no error, since most alerts won't correspond to an open
 trade.
 
-## 6. NOVA (personal assistant) access
+## 6. NOVA (personal assistant) access — read-only
 
-NOVA can list trades, add new ones and close open ones in **one** user's
-journal — nothing else (no delete, no arbitrary edits). Routes and the exact
-trade shape are documented at the top of `src/nova.js`.
+NOVA can **read** one user's trades (`GET /nova/trades`) — nothing else. There is
+no route that creates, changes or deletes anything; other methods answer 405,
+other paths 404. Details at the top of `src/nova.js`.
 
-- Auth: `X-Api-Key` header with `NOVA_API_KEY` (set it with
-  `wrangler secret put NOVA_API_KEY` for a key separate from TradingView's),
-  falling back to the existing `API_KEY`. Fails closed if neither is set, and
-  never accepts the key as a `?key=` query param.
-- `?uid=<your Firebase UID>` selects whose journal — same UID as in the
-  TradingView webhook URL.
-- Trades NOVA writes carry `source: "nova"` and use the same optimistic-lock
-  save as the frontend and webhook, so nothing gets overwritten.
+- Auth: a dedicated token `NOVA_ACCESS_TOKEN` (min. 32 characters), sent as
+  `X-Api-Key` header (what NOVA sends) or `Authorization: Bearer`. Separate from
+  `API_KEY` (TradingView) and from the Firebase login; never accepted as `?key=`.
+  Compared in constant time. Fails closed if not set.
+- `NOVA_ALLOWED_UID`: the one Firebase UID NOVA may read (same UID as in the
+  TradingView webhook URL). NOVA passes it as `?uid=`; any other UID is 403.
+- Response: only the fields NOVA needs. Journal notes are never returned
+  (`notes` is always `""`), no ratings, screenshots, strategy rules or credentials.
+- Rate limit: 60 requests/minute per client IP (429 + `Retry-After`), best effort
+  per Worker isolate.
+
+```bash
+cd worker
+npx wrangler secret put NOVA_ACCESS_TOKEN   # e.g. output of: openssl rand -hex 32
+npx wrangler secret put NOVA_ALLOWED_UID    # your Firebase UID
+npm run deploy
+
+curl -H "X-Api-Key: {{NOVA_ACCESS_TOKEN}}" \
+  "https://ground-delta-worker.<subdomain>.workers.dev/nova/trades?uid={{NOVA_ALLOWED_UID}}&status=open&limit=5"
+```
 
 Tests: `npm test` (Node's built-in test runner, no dependencies).

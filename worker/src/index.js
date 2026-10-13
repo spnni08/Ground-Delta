@@ -7,7 +7,7 @@
 //   GET    /api/state                      -> { data, version }              [Firebase ID token required]
 //   PUT    /api/state                      -> { data, expectedVersion } -> { version } | 409   [Firebase ID token required]
 //   POST   /webhook/close                  -> TradingView alert -> closes matching open trade(s)  [API_KEY + ?uid= required]
-//   GET    /nova/trades, POST /nova/trades, POST /nova/trades/:id/close -> NOVA assistant (see nova.js)  [X-Api-Key + ?uid= required]
+//   GET    /nova/trades                    -> NOVA assistant, READ-ONLY (see nova.js)  [NOVA_ACCESS_TOKEN in X-Api-Key + ?uid= required]
 //   GET    /admin/users                    -> [{ uid, tradeCount, strategyCount, version, updatedAt, blocked, lastSeen, online }]  [admin UID only]
 //   GET    /admin/state?uid=X              -> { data, version }                                          [admin UID only]
 //   PUT    /admin/state?uid=X              -> { data, expectedVersion } -> { version } | 409             [admin UID only]
@@ -316,6 +316,14 @@ async function getState(env, uid) {
   return { data: { strategies: [], trades: [] }, version: 0 };
 }
 
+// Pure SELECT (no legacy-row adoption, no writes) for the read-only NOVA route.
+async function readState(env, uid) {
+  const row = await env.DB.prepare('SELECT data, version FROM workspace_state WHERE id = ?')
+    .bind(uid).first();
+  if (row) return { data: JSON.parse(row.data), version: row.version };
+  return { data: { strategies: [], trades: [] }, version: 0 };
+}
+
 async function saveState(env, uid, data, expectedVersion) {
   const now = new Date().toISOString();
   const existing = await env.DB.prepare('SELECT version FROM workspace_state WHERE id = ?')
@@ -593,7 +601,7 @@ export default {
       return json({ version: result.version }, 200, origin);
     }
 
-    const novaResponse = await handleNova(request, env, url, origin, { getState, saveState, isBlocked, json });
+    const novaResponse = await handleNova(request, env, url, { readState, isBlocked });
     if (novaResponse) return novaResponse;
 
     if (url.pathname === '/webhook/close' && request.method === 'POST') {

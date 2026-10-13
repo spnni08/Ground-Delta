@@ -1,157 +1,123 @@
-// NOVA (personal assistant) access to one user's journal.
+// NOVA (personal assistant) READ-ONLY access to one user's journal.
 //
-//   GET  /nova/trades?uid=X[&status=open|closed|all][&from=YYYY-MM-DD][&to=YYYY-MM-DD][&limit=N]
-//        -> { trades: [...], strategies: [{ id, name }] }
-//   POST /nova/trades?uid=X                 body: trade fields (see buildTrade) -> { trade, version }
-//   POST /nova/trades/:id/close?uid=X       body: { exit, exitTime?, pnl? }     -> { trade, version }
+//   GET /nova/trades?uid=X[&status=open|closed|all][&from=YYYY-MM-DD][&to=YYYY-MM-DD][&limit=N]
+//       -> { trades: [...], strategies: [{ id, name }] }
 //
-// Auth: shared secret in the `X-Api-Key` header — `NOVA_API_KEY` if set,
-// otherwise the existing webhook `API_KEY`. Unlike /webhook/close this
-// FAILS CLOSED when no key is configured, and the key is only accepted as a
-// header (never `?key=`), so it doesn't end up in request logs.
+// This is the only route. Every other method on it answers 405, every other
+// path 404 (after authentication). Nothing in this file writes: the handler
+// gets a `readState` dependency (a plain SELECT) and no save function.
 //
-// Writes go through the same optimistic-lock saveState() as the frontend
-// and the webhook (one retry on a version conflict), and produce trades in
-// exactly the shape the frontend's saveTrade() writes, so they show up in
-// the journal like hand-entered ones. NOVA can only add and close trades —
-// there is deliberately no delete or arbitrary-edit route.
+// Auth: a dedicated secret `NOVA_ACCESS_TOKEN`, sent in the `X-Api-Key`
+// header (what NOVA's worker sends) or as `Authorization: Bearer <token>`.
+// It is separate from `API_KEY` (TradingView webhook) and from the Firebase
+// login, and never accepted as a `?key=` query param. Compared in constant
+// time (SHA-256 digests, so the length doesn't leak either). Fails closed:
+// no token configured, or one shorter than MIN_TOKEN_LENGTH -> always 401.
+//
+// Scope: the token only opens the journal of the single UID configured in
+// `NOVA_ALLOWED_UID`; any other `?uid=` is 403. NOVA's request format
+// (`?uid=`) is kept as is.
+//
+// Output is minimised: notes (free text), rating, screenshots, rule checks and
+// the internal `source` field are never returned. `notes` stays in the
+// response as "" because NOVA's type expects the field.
+//
+// Rate limit: fixed window per client IP, counted before authentication so
+// brute-force attempts are limited too. It lives in the memory of one Worker
+// isolate, i.e. it is best effort, not a global limit.
 
-const uid = () => Math.random().toString(36).slice(2, 9);
-const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
-const toNum = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const MIN_TOKEN_LENGTH = 32;
+export const RATE_LIMIT = { max: 60, windowMs: 60_000 };
 
-function novaAuthOk(request, env) {
-  const expected = env.NOVA_API_KEY || env.API_KEY;
-  if (!expected) return false;
-  const given = request.headers.get('X-Api-Key') || '';
-  if (given.length !== expected.length) return false;
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const numOrNull = (v) => (isNum(v) ? v : null);
+
+const buckets = new Map();
+export function resetRateLimit() { buckets.clear(); }
+
+/** Returns seconds to wait if the client is over the limit, else 0. */
+function rateLimited(key, now) {
+  if (buckets.size > 1000) {
+    for (const [k, b] of buckets) if (now - b.start >= RATE_LIMIT.windowMs) buckets.delete(k);
+  }
+  let b = buckets.get(key);
+  if (!b || now - b.start >= RATE_LIMIT.windowMs) { b = { start: now, count: 0 }; buckets.set(key, b); }
+  b.count++;
+  return b.count > RATE_LIMIT.max ? Math.ceil((b.start + RATE_LIMIT.windowMs - now) / 1000) : 0;
+}
+
+async function digest(s) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
+}
+
+async function tokenOk(request, env) {
+  const expected = env.NOVA_ACCESS_TOKEN;
+  if (typeof expected !== 'string' || expected.length < MIN_TOKEN_LENGTH) return false;
+  const bearer = (request.headers.get('Authorization') || '').match(/^Bearer (.+)$/i);
+  const given = request.headers.get('X-Api-Key') || (bearer ? bearer[1] : '');
+  const [a, b] = await Promise.all([digest(given), digest(expected)]);
   let diff = 0;
-  for (let i = 0; i < given.length; i++) diff |= given.charCodeAt(i) ^ expected.charCodeAt(i);
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
   return diff === 0;
 }
 
-// Mirrors the frontend's autoPnl(): (exit-entry) * size * leverage, sign-flipped for shorts.
-function autoPnl(t, exit) {
-  if (!isNum(t.size) || t.size <= 0) return null;
-  const lev = isNum(t.leverage) && t.leverage > 0 ? t.leverage : 1;
-  const sign = t.dir === 'Short' ? -1 : 1;
-  return Math.round((exit - t.entry) * sign * t.size * lev * 100) / 100;
+function reply(data, status, extraHeaders) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: Object.assign({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, extraHeaders),
+  });
 }
 
-/** Validates NOVA's input and returns a trade in the frontend's shape, or { error }. */
-export function buildTrade(b, strategies) {
-  const date = String(b.date || '');
-  if (!DATE_RE.test(date)) return { error: 'date (YYYY-MM-DD) is required' };
-  const symbol = String(b.symbol || '').trim().toUpperCase();
-  if (!symbol) return { error: 'symbol is required' };
-  const dirRaw = String(b.dir || b.direction || '').toLowerCase();
-  if (dirRaw !== 'long' && dirRaw !== 'short') return { error: 'dir must be Long or Short' };
-  const dir = dirRaw === 'long' ? 'Long' : 'Short';
-  const entry = toNum(b.entry);
-  if (!isNum(entry)) return { error: 'entry price is required' };
-  const entryTime = TIME_RE.test(String(b.entryTime || '')) ? b.entryTime : '00:00';
-  const lev = toNum(b.leverage);
-  const size = toNum(b.size);
-
-  let strategyId = '';
-  if (b.strategyId || b.strategy) {
-    const want = String(b.strategyId || b.strategy).toLowerCase();
-    const s = (strategies || []).find((x) => x.id === b.strategyId || String(x.name || '').toLowerCase() === want);
-    if (!s) return { error: 'unknown strategy: ' + (b.strategyId || b.strategy) };
-    strategyId = s.id;
-  }
-
-  const base = {
-    id: uid(), date, entryTime, symbol, dir, entry,
-    sl: toNum(b.sl), tp: toNum(b.tp),
-    size: isNum(size) ? size : 0, leverage: isNum(lev) && lev > 0 ? lev : 1,
-    session: typeof b.session === 'string' ? b.session : '',
-    strategyId, checks: {}, notes: typeof b.notes === 'string' ? b.notes.slice(0, 2000) : '', shot: null,
-    source: 'nova',
-  };
-
-  const exit = toNum(b.exit);
-  if (!isNum(exit)) {
-    return { trade: Object.assign(base, { exitTime: '', exit: null, pnl: null, rating: null, notes: '', status: 'open' }) };
-  }
-  let pnl = toNum(b.pnl);
-  if (!isNum(pnl)) pnl = autoPnl(base, exit);
-  if (!isNum(pnl)) return { error: 'pnl or size is required to close a trade' };
-  const exitTime = TIME_RE.test(String(b.exitTime || '')) ? b.exitTime : entryTime;
-  return { trade: Object.assign(base, { exit, exitTime, pnl, rating: null, status: 'closed' }) };
-}
-
+// Only what NOVA's GdTrade type needs. Free-text notes are deliberately blanked.
 function summarize(t, strategies) {
   const s = (strategies || []).find((x) => x.id === t.strategyId);
   return {
-    id: t.id, date: t.date, entryTime: t.entryTime, exitTime: t.exitTime || '', symbol: t.symbol, dir: t.dir,
-    entry: t.entry, exit: t.exit ?? null, sl: isNum(t.sl) ? t.sl : null, tp: isNum(t.tp) ? t.tp : null,
-    size: t.size, leverage: t.leverage, pnl: t.pnl ?? null, status: t.status === 'open' ? 'open' : 'closed',
-    session: t.session || '', strategy: s ? s.name : '', notes: t.notes || '', rating: t.rating ?? null,
+    id: t.id, date: t.date, entryTime: t.entryTime || '', exitTime: t.exitTime || '', symbol: t.symbol, dir: t.dir,
+    entry: t.entry, exit: numOrNull(t.exit), sl: numOrNull(t.sl), tp: numOrNull(t.tp),
+    size: t.size, leverage: t.leverage, pnl: numOrNull(t.pnl), status: t.status === 'open' ? 'open' : 'closed',
+    session: t.session || '', strategy: s ? s.name : '', notes: '',
   };
 }
 
-/** Returns a Response for /nova/* or null if the path isn't ours. */
-export async function handleNova(request, env, url, origin, deps) {
-  if (!url.pathname.startsWith('/nova/')) return null;
-  const { getState, saveState, isBlocked, json } = deps;
-  if (!novaAuthOk(request, env)) return json({ error: 'unauthorized' }, 401, origin);
+/**
+ * Returns a Response for /nova/* or null if the path isn't ours.
+ * deps: { readState(env, uid) -> { data }, isBlocked(env, uid), now?() }
+ */
+export async function handleNova(request, env, url, deps) {
+  if (url.pathname !== '/nova' && !url.pathname.startsWith('/nova/')) return null;
+  const now = deps.now ? deps.now() : Date.now();
+
+  const wait = rateLimited(request.headers.get('CF-Connecting-IP') || 'unknown', now);
+  if (wait) return reply({ error: 'rate limit exceeded' }, 429, { 'Retry-After': String(wait) });
+
+  if (!(await tokenOk(request, env))) return reply({ error: 'unauthorized' }, 401, { 'WWW-Authenticate': 'Bearer' });
+
+  if (url.pathname !== '/nova/trades') return reply({ error: 'not found' }, 404);
+  if (request.method !== 'GET') {
+    return reply({ error: 'read-only: NOVA access cannot create, change or delete anything' }, 405, { Allow: 'GET' });
+  }
+
+  if (!env.NOVA_ALLOWED_UID) return reply({ error: 'NOVA access is not configured (NOVA_ALLOWED_UID missing)' }, 503);
   const userId = url.searchParams.get('uid');
-  if (!userId) return json({ error: '?uid= query param is required' }, 400, origin);
-  if (await isBlocked(env, userId)) return json({ error: 'account blocked' }, 403, origin);
+  if (!userId) return reply({ error: '?uid= query param is required' }, 400);
+  if (userId !== env.NOVA_ALLOWED_UID) return reply({ error: 'forbidden' }, 403);
+  if (await deps.isBlocked(env, userId)) return reply({ error: 'account blocked' }, 403);
 
-  if (url.pathname === '/nova/trades' && request.method === 'GET') {
-    const { data } = await getState(env, userId);
-    const strategies = data.strategies || [];
-    const status = url.searchParams.get('status') || 'all';
-    const from = url.searchParams.get('from');
-    const to = url.searchParams.get('to');
-    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 50));
-    const list = (data.trades || [])
-      .filter((t) => status === 'all' || (status === 'open' ? t.status === 'open' : t.status !== 'open'))
-      .filter((t) => (!from || t.date >= from) && (!to || t.date <= to))
-      .sort((a, b) => (b.date + b.entryTime).localeCompare(a.date + a.entryTime))
-      .slice(0, limit)
-      .map((t) => summarize(t, strategies));
-    return json({ trades: list, strategies: strategies.map((s) => ({ id: s.id, name: s.name })) }, 200, origin);
-  }
+  const status = url.searchParams.get('status') || 'all';
+  if (!['all', 'open', 'closed'].includes(status)) return reply({ error: 'status must be open, closed or all' }, 400);
+  const from = url.searchParams.get('from');
+  const to = url.searchParams.get('to');
+  if ((from && !DATE_RE.test(from)) || (to && !DATE_RE.test(to))) return reply({ error: 'from/to must be YYYY-MM-DD' }, 400);
+  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 50));
 
-  const closeMatch = url.pathname.match(/^\/nova\/trades\/([^/]+)\/close$/);
-  const isCreate = url.pathname === '/nova/trades' && request.method === 'POST';
-  if (!isCreate && !(closeMatch && request.method === 'POST')) return json({ error: 'not found' }, 404, origin);
-
-  let body;
-  try { body = await request.json(); } catch (e) { return json({ error: 'invalid JSON body' }, 400, origin); }
-  if (!body || typeof body !== 'object') return json({ error: 'JSON object body required' }, 400, origin);
-
-  // Retry once on a version conflict (frontend or webhook saving in the same instant).
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const { data, version } = await getState(env, userId);
-    const trades = data.trades || [];
-    let trade;
-    let nextTrades;
-    if (isCreate) {
-      const built = buildTrade(body, data.strategies);
-      if (built.error) return json({ error: built.error }, 400, origin);
-      trade = built.trade;
-      nextTrades = trades.concat([trade]);
-    } else {
-      const existing = trades.find((t) => t.id === closeMatch[1]);
-      if (!existing) return json({ error: 'trade not found' }, 404, origin);
-      if (existing.status !== 'open') return json({ error: 'trade is already closed' }, 409, origin);
-      const exit = toNum(body.exit);
-      if (!isNum(exit)) return json({ error: 'numeric exit is required' }, 400, origin);
-      let pnl = toNum(body.pnl);
-      if (!isNum(pnl)) pnl = autoPnl(existing, exit);
-      if (!isNum(pnl)) return json({ error: 'pnl is required (trade has no size)' }, 400, origin);
-      const exitTime = TIME_RE.test(String(body.exitTime || '')) ? body.exitTime : existing.entryTime || '00:00';
-      trade = Object.assign({}, existing, { status: 'closed', exit, exitTime, pnl });
-      nextTrades = trades.map((t) => (t.id === trade.id ? trade : t));
-    }
-    const result = await saveState(env, userId, Object.assign({}, data, { trades: nextTrades }), version);
-    if (!result.conflict) return json({ trade: summarize(trade, data.strategies), version: result.version }, 200, origin);
-  }
-  return json({ error: 'could not save after retry, please retry' }, 409, origin);
+  const { data } = await deps.readState(env, userId);
+  const strategies = data.strategies || [];
+  const list = (data.trades || [])
+    .filter((t) => status === 'all' || (status === 'open' ? t.status === 'open' : t.status !== 'open'))
+    .filter((t) => (!from || t.date >= from) && (!to || t.date <= to))
+    .sort((a, b) => ((b.date || '') + (b.entryTime || '')).localeCompare((a.date || '') + (a.entryTime || '')))
+    .slice(0, limit)
+    .map((t) => summarize(t, strategies));
+  return reply({ trades: list, strategies: strategies.map((s) => ({ id: s.id, name: s.name })) }, 200);
 }
