@@ -8,7 +8,9 @@
     "db:migrate:local": "wrangler d1 execute ground-delta-db --local --file=./schema.sql",
     "db:migrate:remote": "wrangler d1 execute ground-delta-db --remote --file=./schema.sql",
     "db:migrate:admin-panel:local": "wrangler d1 execute ground-delta-db --local --file=./migrations/0001_admin_panel.sql",
-    "db:migrate:admin-panel:remote": "wrangler d1 execute ground-delta-db --remote --file=./migrations/0001_admin_panel.sql"
+    "db:migrate:admin-panel:remote": "wrangler d1 execute ground-delta-db --remote --file=./migrations/0001_admin_panel.sql",
+    "db:migrate:nova-write:local": "wrangler d1 execute ground-delta-db --local --file=./migrations/0002_nova_write.sql",
+    "db:migrate:nova-write:remote": "wrangler d1 execute ground-delta-db --remote --file=./migrations/0002_nova_write.sql"
   },
   "devDependencies": {
     "wrangler": "^3.78.0"
