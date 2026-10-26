@@ -202,7 +202,7 @@ function buildTrade(v, nowIso) {
   };
   if (v.exit === undefined) return Object.assign(base, { exitTime: '', exit: null, pnl: null, rating: null, status: 'open' });
   return Object.assign(base, {
-    exit: v.exit, exitTime: v.exitTime || base.entryTime, pnl: v.pnl ?? autoPnl(base, v.exit), rating: null, status: 'closed',
+    exit: v.exit, exitTime: v.exitTime || '', pnl: v.pnl ?? autoPnl(base, v.exit), rating: null, status: 'closed',
   });
 }
 
@@ -274,7 +274,7 @@ async function handleWrite(request, url, userId, closeId, deps) {
         if (!isNum(pnl)) return await fail(400, 'invalid request: pnl is required (trade has no size)');
         trade = Object.assign({}, existing, {
           status: 'closed', exit: parsed.value.exit, pnl,
-          exitTime: parsed.value.exitTime || existing.entryTime || '00:00', closedSource: 'nova', novaClosedAt: nowIso,
+          exitTime: parsed.value.exitTime || nowIso.slice(11, 16), closedSource: 'nova', novaClosedAt: nowIso,
         });
         nextTrades = trades.map((t) => (t.id === trade.id ? trade : t));
       }
