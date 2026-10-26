@@ -1,3 +1,10 @@
+-- Initial D1 schema (idempotent: every statement is CREATE TABLE IF NOT EXISTS).
+-- Replaces the former schema.sql + 0001_admin_panel.sql + 0002_nova_write.sql.
+-- Applied via `wrangler d1 migrations apply ground-delta-db --remote`; databases
+-- created by the old files already contain these tables, so this is a no-op there.
+-- Note: trades live as JSON inside workspace_state.data ({ strategies, trades }),
+-- there is no separate trade table.
+
 -- Ground Delta backend schema (Cloudflare D1)
 --
 -- One JSON blob per user rather than normalized trade/strategy tables.

@@ -29,7 +29,7 @@ npx wrangler d1 create ground-delta-db               # prints a database_id
 Paste the printed `database_id` into `wrangler.toml` (`REPLACE_WITH_D1_DATABASE_ID`), then:
 
 ```bash
-npm run db:migrate:remote                            # creates the workspace_state table
+npm run db:migrate:remote                            # applies migrations/ (creates all tables)
 npx wrangler secret put API_KEY                      # pick any long random string — for the TradingView webhook only
 npm run deploy
 ```
@@ -123,7 +123,7 @@ Setup (order matters — the migration first):
 
 ```bash
 cd worker
-npm run db:migrate:nova-write:remote            # creates nova_idempotency + nova_audit_log
+npm run db:migrate:remote                       # creates nova_idempotency + nova_audit_log (already part of 0001_init.sql)
 npx wrangler secret put NOVA_ACCESS_TOKEN       # read token,  e.g. openssl rand -hex 32
 npx wrangler secret put NOVA_WRITE_TOKEN        # write token, a different openssl rand -hex 32
 npx wrangler secret put NOVA_ALLOWED_UID        # your Firebase UID

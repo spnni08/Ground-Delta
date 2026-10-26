@@ -1,7 +1,7 @@
 // Ground Delta backend worker — Phase 3 + Firebase Auth + admin panel.
 //
 // Stores the { strategies, trades } tree as one JSON blob per Firebase
-// user (D1 row keyed by UID — see schema.sql), guarded by an
+// user (D1 row keyed by UID — see migrations/0001_init.sql), guarded by an
 // optimistic-lock `version` column so a stale frontend write can't
 // silently clobber a trade the webhook just closed. Exposes:
 //   GET    /api/state                      -> { data, version }              [Firebase ID token required]

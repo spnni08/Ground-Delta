@@ -9,7 +9,7 @@ try { ({ DatabaseSync } = await import('node:sqlite')); } catch (e) { /* older N
 
 function fakeD1() {
   const sqlite = new DatabaseSync(':memory:');
-  sqlite.exec(readFileSync(new URL('../migrations/0002_nova_write.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
   return {
     sqlite,
     prepare: (sql) => ({
