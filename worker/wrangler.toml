@@ -8,6 +8,7 @@ compatibility_date = "2024-09-01"
 binding = "DB"
 database_name = "ground-delta-db"
 database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
 
 [vars]
 FIREBASE_PROJECT_ID = "ground-delta-journal"
@@ -26,7 +27,7 @@ FIREBASE_PROJECT_ID = "ground-delta-journal"
 #
 # NOVA (GET /nova/trades, POST /nova/trades, POST /nova/trades/:id/close) needs
 # three secrets and one D1 migration, see README section 6:
-#   npm run db:migrate:nova-write:remote    (migrations/0002_nova_write.sql, BEFORE deploying)
+#   npm run db:migrate:remote               (migrations/0001_init.sql, BEFORE deploying; CI does this too)
 #   wrangler secret put NOVA_ACCESS_TOKEN   (read token,  min. 32 chars, separate from API_KEY)
 #   wrangler secret put NOVA_WRITE_TOKEN    (write token, min. 32 chars, different from the read token)
 #   wrangler secret put NOVA_ALLOWED_UID    (the one Firebase UID NOVA may read/write)

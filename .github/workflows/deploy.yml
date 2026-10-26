@@ -5,7 +5,12 @@ on:
     branches: [main]
     paths:
       - 'ground-delta/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch: {}
+
+concurrency:
+  group: deploy-firebase
+  cancel-in-progress: false
 
 jobs:
   deploy:
